@@ -205,24 +205,13 @@ class DataPlotter(object):
             sample_freq = self.sr
 
         if self.opt.mean:
-            #detrend_fn = matplotlib.mlab.detrend_mean
-            print('applying detrend')
             detrend_fn = 'constant'
         else:
-            #detrend_fn = matplotlib.mlab.detrend_none
             detrend_fn = False
         try:
-            # psd_data, freq_axis = matplotlib.mlab.psd(
-            #     data,
-            #     NFFT=self.opt.fft_bins,
-            #     Fs=float(sample_freq),
-            #     detrend=detrend_fn,
-            #     scale_by_freq=False,
-            # )
             freq_axis, psd_data = scipy.signal.welch(
                 data,
                 fs=float(sample_freq),
-                #nfft=self.opt.fft_bins,
                 nperseg=self.opt.fft_bins,
                 detrend=detrend_fn,
                 scaling='spectrum',
