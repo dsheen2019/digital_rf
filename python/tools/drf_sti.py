@@ -248,6 +248,8 @@ class DataPlotter(object):
             num_cores = multiprocessing.cpu_count()
         else:
             num_cores = np.minimum(multiprocessing.cpu_count(),self.opt.num_processes)
+
+        print(f'Using {num_cores} threads for STI calculation')
         
         pool = multiprocessing.Pool()
         pool = multiprocessing.Pool(processes=num_cores)
