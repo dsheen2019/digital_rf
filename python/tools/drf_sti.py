@@ -243,8 +243,12 @@ class DataPlotter(object):
 
         sti_psd_data = np.zeros([self.opt.fft_bins, len(start_samples)], np.float64)
         sti_times = np.zeros([len(start_samples)], np.complex128)
-
-        num_cores = multiprocessing.cpu_count()
+        
+        if self.opt.num_processes==0:
+            num_cores = multiprocessing.cpu_count()
+        else:
+            num_cores = np.min(multiprocessing.cpu_count(),self.opt.num_processes)
+        
         pool = multiprocessing.Pool()
         pool = multiprocessing.Pool(processes=num_cores)
 
@@ -644,6 +648,17 @@ def parse_command_line():
             "zaxis colorbar setting e.g. -z=-50:50 ;"
             " = needed due to argparse issue with negative numbers"
         ),
+    )
+    parser.add_argument(
+        "-P",
+        "--processes",
+        dest="num_processes",
+        default=1,
+        type=int,
+        help="""Number of processes to use for computing the STI. 
+                If omitted defaults to 1 (single threaded).
+                setting processes to 0 will default to using a number of 
+                processes equal to the number of available cpu cores""",
     )
     parser.add_argument(
         "-o",
