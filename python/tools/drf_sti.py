@@ -247,7 +247,7 @@ class DataPlotter(object):
         if self.opt.num_processes==0:
             num_cores = multiprocessing.cpu_count()
         else:
-            num_cores = np.min(multiprocessing.cpu_count(),self.opt.num_processes)
+            num_cores = np.minimum(multiprocessing.cpu_count(),self.opt.num_processes)
         
         pool = multiprocessing.Pool()
         pool = multiprocessing.Pool(processes=num_cores)
