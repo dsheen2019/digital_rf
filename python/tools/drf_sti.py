@@ -206,6 +206,7 @@ class DataPlotter(object):
 
         if self.opt.mean:
             #detrend_fn = matplotlib.mlab.detrend_mean
+            print('applying detrend')
             detrend_fn = 'constant'
         else:
             #detrend_fn = matplotlib.mlab.detrend_none
@@ -230,7 +231,7 @@ class DataPlotter(object):
         except Exception:
             traceback.print_exc(file=sys.stdout)
 
-        sti_psd_data = np.real(10.0 * np.log10(np.abs(scipy.fft.fftshift(psd_data)) + 1e-20))
+        sti_psd_data = np.real(10.0 * np.log10(np.abs(scipy.fft.fftshift(psd_data)) + 1e-20)) #1e-20 is added to prevent divide by zero issues with logarithm 
 
         sti_time = start_sample / self.sr
 
