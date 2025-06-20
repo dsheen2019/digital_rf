@@ -161,6 +161,7 @@ class DigitalRFMirror(object):
         include_drf=True,
         include_dmd=True,
         force_polling=False,
+        exit_on_complete=False,
     ):
         """Create Digital RF mirror object. Use start/run method to begin.
 
@@ -217,6 +218,10 @@ class DigitalRFMirror(object):
             If True, force the watchdog to use polling instead of the default
             observer.
 
+        exit_on_complete : bool
+            Exit when endtime has passed and no additional files prior to endtime 
+            are found in the source directory. (default : False)
+
         """
         self.src = os.path.abspath(src)
         self.dest = os.path.abspath(dest)
@@ -231,6 +236,7 @@ class DigitalRFMirror(object):
         self.include_drf = include_drf
         self.include_dmd = include_dmd
         self.force_polling = force_polling
+        self.exit_on_complete = exit_on_complete
 
         if not self.include_drf and not self.include_dmd:
             errstr = "One of `include_drf` or `include_dmd` must be True."
@@ -391,7 +397,8 @@ class DigitalRFMirror(object):
                     self._init_observer()
                     self.observer.start()
                 time.sleep(1)
-                if self.endtime is not None:
+                #check for exit condition
+                if self.exit_on_complete and (self.endtime is not None):
                     now = datetime.datetime.now(tz=datetime.timezone.utc).replace(microsecond=0)
                     if self.endtime.timestamp() - now.timestamp() + buffer_time < 0:
                         rechecks = rechecks - 1 #decrement rechecks
@@ -454,6 +461,14 @@ def _build_mirror_parser(Parser, *args):
         action="store_false",
         help="""Do not mirror Digital Metadata HDF5 files.
                 (default: False)""",
+    )
+
+    exitgroup = parser.add_argument_group(title="exit condition")
+    parser.add_argument(
+        "--exit",
+        action="store_true",
+        help="""Exit after endtime if no new drf files are found.
+                requires enddtime be specified (default: False)""",
     )
 
     parser = watchdog_drf._add_watchdog_group(parser)
