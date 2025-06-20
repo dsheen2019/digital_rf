@@ -203,7 +203,7 @@ class DigitalRFMirror(object):
 
         endtime : datetime.datetime
             Data covering this time or earlier will be included. This has no
-            effect on property files.
+            effect on property files. 
 
         include_drf : bool
             If True, include Digital RF files. If False, ignore Digital RF
@@ -340,6 +340,8 @@ class DigitalRFMirror(object):
             # copy again or fail to move because the source doesn't exist)
             # mirror properties at minimum
 
+            print('start\r\n')
+
             paths = list_drf.ilsdrf(
                 self.src,
                 include_drf=False,
@@ -370,12 +372,13 @@ class DigitalRFMirror(object):
                 for handler in self.event_handlers:
                     handler.dispatch(event, match_time=False)
 
-            print(len(paths))
-
-
-
     def join(self):
-        """Wait until a KeyboardInterrupt is received to stop mirroring."""
+        """Wait until we have finished copying all files there will be or
+        a KeyboardInterrupt is received to stop mirroring."""
+
+        rechecks = 1 #number of times to recheck directory after end before exiting
+        buffer_time = 1 #mumber of seconds to hold off before concluding there really won't be more files written
+
         try:
             while True:
                 if not self.observer.all_alive():
@@ -388,6 +391,12 @@ class DigitalRFMirror(object):
                     self._init_observer()
                     self.observer.start()
                 time.sleep(1)
+                if self.endtime is not None:
+                    now = datetime.datetime.now(tz=datetime.timezone.utc).replace(microsecond=0)
+                    if self.endtime.timestamp() - now.timestamp() + buffer_time < 0:
+                        rechecks = rechecks - 1 #decrement rechecks
+                    if rechecks < 0:
+                        break
         except KeyboardInterrupt:
             # catch keyboard interrupt and simply exit
             pass
