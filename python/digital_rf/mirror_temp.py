@@ -466,6 +466,7 @@ def _build_mirror_parser(Parser, *args):
     exitgroup = parser.add_argument_group(title="exit condition")
     parser.add_argument(
         "--exit",
+        dest="exit_on_complete",
         action="store_true",
         help="""Exit after endtime if no new drf files are found.
                 requires enddtime be specified (default: False)""",
