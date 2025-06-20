@@ -339,6 +339,7 @@ class DigitalRFMirror(object):
             # critical and duplicate events are not harmful (we will either
             # copy again or fail to move because the source doesn't exist)
             # mirror properties at minimum
+
             paths = list_drf.ilsdrf(
                 self.src,
                 include_drf=False,
@@ -368,6 +369,10 @@ class DigitalRFMirror(object):
                 event = FileCreatedEvent(p)
                 for handler in self.event_handlers:
                     handler.dispatch(event, match_time=False)
+
+            print(len(paths))
+
+
 
     def join(self):
         """Wait until a KeyboardInterrupt is received to stop mirroring."""
