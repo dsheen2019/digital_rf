@@ -242,21 +242,19 @@ class AllenVarProcessor(object):
         sr_effective = float(self.sr / self.minimum_drf_data_size)
         samp_stride_effective = int(sample_stride / self.minimum_drf_data_size)
 
-        x2 = psd_data[:,2*samp_stride_effective::1]
+        #x2 = psd_data[:,2*samp_stride_effective::1]
         x1 = psd_data[:,samp_stride_effective::1]
         x0  = psd_data[::1]
-        
 
         if last_segment: #exhaust the available data if this is the last slice
-            num_samps = np.shape(x2)[1]
-            #num_samps = np.shape(x1)[1]
+            #num_samps = np.shape(x2)[1]
+            num_samps = np.shape(x1)[1]
         else:
-            num_samps = min(int(np.shape(psd_data)[1]/2),np.shape(x2)[1])  #use exactly half the data to line up with my overlap estimates
-            #num_samps = min(int(np.shape(psd_data)[1]/2),np.shape(x1)[1])  #use exactly half the data to line up with my overlap estimates
+            #num_samps = min(int(np.shape(psd_data)[1]/2),np.shape(x2)[1])  #use exactly half the data to line up with my overlap estimates
+            num_samps = min(int(np.shape(psd_data)[1]/2),np.shape(x1)[1])  #use exactly half the data to line up with my overlap estimates
 
-        avars = np.nanmean(np.power(x2[:,:num_samps] - 2*x1[:,:num_samps] + x0[:,:num_samps], 2)  ,axis=1) / (samp_stride_effective/sr_effective)**2
-        #avars = np.nanmean(np.power(x1[:,:num_samps] - x0[:,:num_samps], 2) / samp_stride_effective,axis=1)
-        # #avars = np.nanmedian(np.power(x2[:,:num_samps] - 2*x1[:,:num_samps] + x0[:,:num_samps], 2) / (2.0 *(samp_stride_effective )**2),axis=1)
+        #avars = np.nanmean(np.power(x2[:,:num_samps] - 2*x1[:,:num_samps] + x0[:,:num_samps], 2)  ,axis=1) / (samp_stride_effective/sr_effective)**2
+        avars = np.nanmean(np.power(x1[:,:num_samps] - x0[:,:num_samps], 2) ,axis=1)  / (samp_stride_effective/sr_effective)**2
         avar_vars = avars / (2*(num_samps-1))
         return num_samps, avars, avar_vars
 
