@@ -38,7 +38,7 @@ class AllenVarProcessor(object):
         #general proceesing params
 
         self.decimation = 100 #effectively sets max integration for a given maximum tau
-        self.max_data_chunk_size = 1e8 #* self.opt.num_processes #do not pull in more than about 100MB per process (seems reasonable)
+        self.max_data_chunk_size = 1e8 * self.opt.num_processes #do not pull in more than about 100MB per process (seems reasonable)
         self.max_data_chunk_length = self.max_data_chunk_size / 4 #4 bytes per sample in sane formats
 
     def get_drf_metadata(self):
@@ -254,7 +254,7 @@ class AllenVarProcessor(object):
             num_samps = min(int(np.shape(psd_data)[1]/2),np.shape(x1)[1])  #use exactly half the data to line up with my overlap estimates
 
         #avars = np.nanmean(np.power(x2[:,:num_samps] - 2*x1[:,:num_samps] + x0[:,:num_samps], 2)  ,axis=1) / (samp_stride_effective/sr_effective)**2
-        avars = np.nanmean(np.power(x1[:,:num_samps] - x0[:,:num_samps], 2) ,axis=1)  / (samp_stride_effective/sr_effective)**2
+        avars = np.nanmean(np.power(x1[:,:num_samps] - x0[:,:num_samps], 2) ,axis=1)  / (samp_stride_effective/sr_effective)
         avar_vars = avars / (2*(num_samps-1))
         return num_samps, avars, avar_vars
 
@@ -441,7 +441,10 @@ class AllenVarProcessor(object):
             allan_vars, taus, num_samples =self.process_channel_avars(channel, subchannel)
 
             plt.figure()
-            taulen = np.where(num_samples==0)[0][0]-1
+            try:
+                taulen = np.where(num_samples==0)[0][0]-1
+            except:
+                taulen=len(taus)
             for i in range(self.opt.fft_bins):
                 plt.loglog(taus[:taulen],np.sqrt(allan_vars[:taulen,i]))
             plt.grid()
