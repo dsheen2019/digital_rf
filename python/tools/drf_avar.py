@@ -151,7 +151,8 @@ class AllenVarProcessor(object):
 
             #compute and store allan var
             tau = 1/rate
-            #print(f"computing Allan variance for tau = {tau} seconds")
+            if self.opt.verbose:
+                print(f"computing Allan variance for tau = {tau} seconds")
             avar, avar_var, n_samps = self.estimate_allan_var(data, rate)
             taus.append(1/rate)
             avars.append(avar)
