@@ -182,7 +182,7 @@ class AllenVarProcessor(object):
         data = np.power(np.abs(data),2) #convert to power
         rate = float(self.sr)
 
-        taus, avars, avar_vars, avar_samples, data, rate = self.get_data_avars(data, rate, 4)
+        taus, avars, avar_vars, avar_samples, data, rate = self.get_data_avars(data, rate, 8)
 
         return taus, avars, avar_vars, avar_samples, data, rate
 
@@ -191,7 +191,7 @@ class AllenVarProcessor(object):
         data is a numpy array of data, must be an even length
         rate is sample rate of the data
         """
-
+        
         new_data = np.nanmean(data.reshape((-1,2)),axis=1) #two rows with every other sample
         new_rate = rate/2.0
 
@@ -202,8 +202,10 @@ class AllenVarProcessor(object):
         data is an array of the appropriately integrated allan variance samples (eg. \bar{y})
         rate is the corresponding sample rate of the data (note this is also 1/tau)
         """
-
-        avar = 0.5 * np.nanmean(np.power(data[1::] - data[0:-1], 2)) #despite looking a bit funny this slicing is correct
+        if self.opt.median:
+            avar = 0.5 * np.nanmedian(np.power(data[1::] - data[0:-1], 2)) #despite looking a bit funny this slicing is correct
+        else:
+            avar = 0.5 * np.nanmean(np.power(data[1::] - data[0:-1], 2)) #despite looking a bit funny this slicing is correct
         avar_var = 1/(len(data)-1) * avar
 
         return avar, avar_var, len(data)-1
@@ -430,6 +432,14 @@ def parse_command_line():
         dest="title",
         default=None,
         help="Use title provided for the plot.",
+    )
+    parser.add_argument(
+        "-m",
+        "--median",
+        action="store_true",
+        dest="median",
+        default=False,
+        help="use a median for the variance estimator instead of a mean (helps suppress pulsed RFI impacts)",
     )
     parser.add_argument(
         "-s",
