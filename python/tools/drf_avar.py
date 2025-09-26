@@ -241,7 +241,7 @@ class AllenVarProcessor(object):
             avar_slice = partial(self.handle_data_slice_avars, channel, subchannel, segment_length)
 
             if self.opt.verbose:
-                print("starting multithreaded process")
+                print(f"starting multithreaded processing of {num_segments} data segments on {self.opt.num_processes} cores")
 
             outputs = pool.map(avar_slice, start_indices)
 
