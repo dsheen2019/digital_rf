@@ -39,7 +39,7 @@ class AllenVarProcessor(object):
         #general proceesing params
 
         available_memory_bytes = psutil.virtual_memory().available #definitely don't want to exceed this or we'll page
-        max_bytes_per_process = 128e8 #128 MB #cap per core data sizes for sanity's sake (also helps ensure reasonable workload distribution)
+        max_bytes_per_process = 1024e6 #1024 MB #cap per core data sizes for sanity's sake (also helps ensure reasonable workload distribution)
         bytes_per_sample = 4
 
         max_allowed_data_size_per_core = min(max_bytes_per_process, available_memory_bytes/(4*self.opt.num_processes))  #prevent using up all the computer memory during operations on data
