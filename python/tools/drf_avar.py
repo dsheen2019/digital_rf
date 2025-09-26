@@ -174,8 +174,8 @@ class AllenVarProcessor(object):
         return results and decimated data
         """
         if self.opt.verbose:
-            print("handling data slice starting at sample {start_index}")
-            
+            print(f"handling data slice starting at sample {start_index}")
+
         dio = drf.DigitalRFReader(self.opt.path)
         data = dio.read_vector(start_index, segment_length, channel, subchannel) #import rf data segment
         data = np.power(np.abs(data),2) #convert to power
