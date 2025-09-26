@@ -14,6 +14,7 @@ import datetime
 import argparse
 import os
 import sys
+import psutil
 import time
 import traceback
 import multiprocessing
@@ -37,9 +38,13 @@ class AllenVarProcessor(object):
 
         #general proceesing params
 
-        self.decimation = 100 #effectively sets max integration for a given maximum tau
-        self.max_data_chunk_size = 1e8 * self.opt.num_processes #do not pull in more than about 100MB per process (seems reasonable)
-        self.max_data_chunk_length = self.max_data_chunk_size / 4 #4 bytes per sample in sane formats
+        available_memory_bytes = psutil.virtual_memory().available #definitely don't want to exceed this or we'll page
+        max_bytes_per_process = 128e8 #128 MB #cap per core data sizes for sanity's sake (also helps ensure reasonable workload distribution)
+        bytes_per_sample = 4
+
+        max_allowed_data_size_per_core = min(max_bytes_per_process, available_memory_bytes/(8*self.opt.num_processes))  #prevent using up memory during operations on data
+
+        self.max_samples_per_core = 2**int(np.log2(max_allowed_data_size_per_core / bytes_per_sample))
 
     def get_drf_metadata(self):
         """
@@ -57,10 +62,10 @@ class AllenVarProcessor(object):
         )
 
         #read off properties we care about
-        self.dio = drf.DigitalRFReader(self.opt.path)
-        self.sr = self.dio.get_properties(self.channels[0])["samples_per_second"]
+        dio = drf.DigitalRFReader(self.opt.path)
+        self.sr = dio.get_properties(self.channels[0])["samples_per_second"]
 
-        self.bounds = self.dio.get_bounds(self.channels[0])
+        self.bounds = dio.get_bounds(self.channels[0])
 
         self.dt_start = datetime.datetime.fromtimestamp(
             int(self.bounds[0] / self.sr),
@@ -71,7 +76,7 @@ class AllenVarProcessor(object):
         )
 
 
-        metadata = self.dio.read_metadata(self.bounds[0],self.bounds[0]+1, self.channels[0])
+        metadata = dio.read_metadata(self.bounds[0],self.bounds[0]+1, self.channels[0])
         metadata_key = list(metadata.keys())[0]
         radio_metadata = metadata[metadata_key]
 
@@ -87,7 +92,7 @@ class AllenVarProcessor(object):
 
         #get actual processing bounds
 
-        self.proc_bounds = self.bounds
+        self.proc_bounds = np.array(self.bounds)
 
         if self.opt.start:
             dtst0 = dateutil.parser.parse(self.opt.start)
@@ -103,324 +108,175 @@ class AllenVarProcessor(object):
             ).total_seconds()
             self.proc_bounds[1] = int(et0 * self.sr)
 
+
         if self.opt.verbose:
             print("processing samples within sample index {0}".format(self.proc_bounds))
 
-
-    def get_tau_values(self):
-        """
-        get tau values that actually work with the input data
-        and make sure they are compatible wit reasonable slicing
-        """
-
-        data_len = self.proc_bounds[1] - self.proc_bounds[0]
-        data_len_seconds = data_len/self.sr 
-
-        #get bounds for tau
-        if self.opt.taubounds is not None:
-            tau_min = self.opt.taubounds[0]
-            tau_max = min(self.opt.taubounds[1], data_len_seconds/2.1) #clip to where it will still be computable
-        else:
-            #generate a set of taus based on the data
-            
-            tau_max = data_len_seconds / 3 #use about a third of the samples for actually doing things
-            if self.opt.tauscale.lower() == 'log10': 
-                tau_min = tau_max * 1e-5
-            else: #linear
-                tau_min = tau_max * 1e-3 #1000 samples
-
-
-        #determine base integration time which will be used to generate all samples of tau
-        tmin = tau_min / 10.0 #set to 1 tenth of taumin so that our processing will actually be reasonably 
-
-        #get the true time for tmin compatible with the specified fft slicing
-        fft_rate = self.sr / self.opt.fft_bins 
-
-        fft_slices = max(int(tmin * fft_rate), 1)
-
-        n_min = int(fft_slices * self.opt.fft_bins) #minimum number of samples to a slice
-
-        if self.opt.tauscale.lower() == 'log': 
-            #approximately log10 scaling give or take a bit
-            num_taus = int(10*(np.log10(tau_max) - np.log10(tau_min)))
-            approx_taus = np.logspace(np.log10(tau_min), np.log10(tau_max), num=num_taus, base=10)
-
-            #get corresponding sample strides through the data 
-            #note this is divided by self.opt.fft_bins to fet the strid through the transformed data
-            true_ns = np.unique(np.array([ int((atau * self.sr)/n_min)*n_min for atau in approx_taus]))
-            true_taus = true_ns / float(self.sr)
-
-        else: #linear
-            max_samples = 1000
-            num_taus = int(min(data_len_seconds/tau_min, max_samples))
-            approx_taus = np.linspace(tau_min, tau_max, num=num_taus)
-
-            #get corresponding sample strides through the data 
-            #note this is divided by self.opt.fft_bins to fet the strid through the transformed data
-            true_ns = np.unique(np.array([ int((atau * self.sr)/n_min)*n_min for atau in approx_taus]))
-            true_taus = true_ns / float(self.sr)
-
-        if data_len > self.max_data_chunk_length: #need to import and process multiple data segments
-            #self.iterative_computation = True
-
-            #to make data chunking well behvaed we need to change some of the tau values after computing the data slicing
-
-            #figure out what max tau computed from a single data segment can be to be able to usefully stride 
-            #through x[2n::] -2x[n::] + x[::] need to have 2n correspond to less than half the data then we 
-            #will overlap the data for actually computing all of this 
-
-            #factor of 2 in the max chunk size is because I need to half overlap it 
-
-            self.maximum_drf_data_size = int(self.max_data_chunk_length/(2 * n_min * self.decimation)) * 2 * n_min * self.decimation
-
-            max_single_pass_tau_index = np.where(4 * true_ns > self.maximum_drf_data_size)[0][0]-1
-            if self.opt.verbose:
-                print(f"maximum tau for single data slice = {true_taus[max_single_pass_tau_index]} seconds")
-
-            #taus beyond the point the data is decimted to need to change
-
-            upper_ns = np.array([int(true_n / (n_min * self.decimation)) * (n_min * self.decimation) for true_n in true_ns[max_single_pass_tau_index:-1]])
-            upper_taus = upper_ns / float(self.sr)
-
-            #overwrite original arrays 
-
-            true_ns[max_single_pass_tau_index:-1] = upper_ns
-            true_taus[max_single_pass_tau_index:-1] = upper_taus
-
-            self.tau_pivot_index = max_single_pass_tau_index
-
-        else: #we can comfortably do this in a single pass
-            #self.iterative_computation = False
-            self.maximum_drf_data_size = int(data_len/(2*n_min* self.decimation)) *2 * n_min * self.decimation #ensure that data aligns acceptably to our fft slices
-            self.tau_pivot_index = len(true_taus)
-
-
-
-        self.minimum_drf_data_size = n_min
-        self.tau_sample_strides = true_ns
-        self.tau_values = true_taus
-        
-
-        if self.opt.verbose:
-            print(f"computing Allan Variance for {len(true_ns)} values of tau")
-            print(f"actual minimum tau = {true_taus[0]} s")
-            print(f"actual maximum tau = {true_taus[-1]} s")
-
-
-    def calculate_welch_slice(self, channel, subchannel, indices):
-        '''
-        Calculate the welch method spectrogram for the given data slice and return the spectrogram
-        '''
-
-        #data = self.rfdata[start_index, start_index+self.minimum_drf_data_size]
-        data = self.dio.read_vector(indices[0], indices[1], channel, subchannel)
-        data = np.reshape(data,[self.minimum_drf_data_size,-1])
-        #welch operation
-
-        try:
-            freq_axis, psd_data = scipy.signal.welch(
-                data,
-                fs=float(self.sr),
-                nperseg=self.opt.fft_bins,
-                detrend=False,
-                scaling="density",
-                return_onesided=False,
-                average='mean',
-                axis=0
-            )
-        except Exception:
-            traceback.print_exc(file=sys.stdout)
-
-        return np.real(np.abs(scipy.fft.fftshift(psd_data, axes=0))), scipy.fft.fftshift(freq_axis,axes=0)
-
-    def get_variance_estimantes(self, psd_data, last_segment, sample_stride):
-        """
-        Create an estimate for the Allan variance 
-        sample stride is tau*samp_rate
-        """
-
-        sr_effective = float(self.sr / self.minimum_drf_data_size)
-        samp_stride_effective = int(sample_stride / self.minimum_drf_data_size)
-
-        #x2 = psd_data[:,2*samp_stride_effective::1]
-        x1 = psd_data[:,samp_stride_effective::1]
-        x0  = psd_data[::1]
-
-        if last_segment: #exhaust the available data if this is the last slice
-            #num_samps = np.shape(x2)[1]
-            num_samps = np.shape(x1)[1]
-        else:
-            #num_samps = min(int(np.shape(psd_data)[1]/2),np.shape(x2)[1])  #use exactly half the data to line up with my overlap estimates
-            num_samps = min(int(np.shape(psd_data)[1]/2),np.shape(x1)[1])  #use exactly half the data to line up with my overlap estimates
-
-        #avars = np.nanmean(np.power(x2[:,:num_samps] - 2*x1[:,:num_samps] + x0[:,:num_samps], 2)  ,axis=1) / (samp_stride_effective/sr_effective)**2
-        avars = np.nanmean(np.power(x1[:,:num_samps] - x0[:,:num_samps], 2) ,axis=1)  / (samp_stride_effective/sr_effective)
-        avar_vars = avars / (2*(num_samps-1))
-        return num_samps, avars, avar_vars
-
-
-    def process_data_segment(self, channel, subchannel, start_sample, segment_length, last_segment):
-        """
-        process a given segment of data and return the variances and a downsampled portion of the spectrograms
-        """
-        if self.opt.verbose:
-            print(f"working on data starting at sample {start_sample} and ending at {segment_length+start_sample}")
-
-        #holding_variables for allan deviation calculations
-
-        short_taus = self.tau_values[0:self.tau_pivot_index]
-        short_ns = self.tau_sample_strides[0:self.tau_pivot_index]
-        short_tau_num_samples = np.zeros(self.tau_pivot_index, np.int64)
-        short_tau_allan_vars = np.zeros((self.tau_pivot_index,self.opt.fft_bins), np.float64) #storage variable for allen variance calculations
-
-        ######################################################
-        # multithreaded data access + transform
-        ######################################################
-
-        if self.opt.num_processes == 0:
-            num_cores = multiprocessing.cpu_count()
-        else:
-            num_cores = np.minimum(multiprocessing.cpu_count(), self.opt.num_processes)
-
-        print(f"Using {num_cores} threads for welch calculation")
-
-        slice_len = int(segment_length/(num_cores *self.minimum_drf_data_size)+1)*self.minimum_drf_data_size
-        
-        slice_starts = np.arange(start_sample, start_sample + segment_length, slice_len)
-        slice_stops = slice_starts[1::]
-        slice_stops=np.append(slice_stops, start_sample + segment_length)
-        slice_lens = slice_stops-slice_starts
-        
-        indices =[(start, length) for (start,length) in zip(slice_starts,slice_lens)]
-        
-
-        psd_data = np.zeros([self.opt.fft_bins, int(segment_length/self.minimum_drf_data_size)], np.float64)
-
-
-        pool = multiprocessing.Pool()
-        pool = multiprocessing.Pool(processes=num_cores)
-
-        welch = partial(self.calculate_welch_slice, channel, subchannel)
-
-        outputs = pool.map(welch, indices)
-
-        pool.close()
-        pool.join()
-
-        for b in np.arange(len(slice_starts), dtype=np.int_):
-            #psd_data = outputs[b][0]
-            psd_data[:, int((slice_starts[b]-start_sample)/self.minimum_drf_data_size):int((slice_stops[b]-start_sample)/self.minimum_drf_data_size)] = outputs[b][0]
-            freq_axis = outputs[b][1]
-
-
-        ###############################################################################
-        # Handle computation of Allan variances that can be computed within the segment
-        ###############################################################################
-
-        if self.opt.verbose:
-            print(f"working on Allan Variance Calculation with {num_cores} threads")
-
-        pool = multiprocessing.Pool()
-        pool = multiprocessing.Pool(processes=num_cores)
-
-        self.psd_data_slice = psd_data
-
-        avars = partial(self.get_variance_estimantes, psd_data, last_segment)
-        outputs = pool.map(avars, short_ns)
-
-        pool.close()
-        pool.join()
-
-        for i in range(len(short_taus)):
-            short_tau_num_samples[i] = outputs[i][0]
-            short_tau_allan_vars[i] = outputs[i][1] 
-            avar_vars = outputs[i][2]
-
-
-        ###############################################################################
-        # Decimate spectrograms so they can be accumulated for long timescales
-        ###############################################################################
-        try:
-            if last_segment:
-                psd_len = len(np.reshape(psd_data,(-1,1)))
-                truncated_len = int(psd_len/(self.opt.fft_bins*self.decimation)) *(self.opt.fft_bins*self.decimation)
-
-                if truncated_len >0:
-                    reshaped_psds = np.reshape(np.reshape(psd_data,(-1,1))[:truncated_len],(self.opt.fft_bins,self.decimation,-1))
-                    decimated_psds = np.nanmean(reshaped_psds,axis=1)
-                else:
-                    decimated_psds = np.empty((self.opt.fft_bins,)).fill(np.nan) #just to have something to return that isn't empty
+        ### check for bad samples at start of data
+
+        self.start_offsets = []
+
+        for channel in self.channels:
+            rfdata = dio.read_vector(self.proc_bounds[0], int(1.0*self.sr), channel, 0)
+            nans = np.where(np.isnan(rfdata))[0]
+            if len(nans) == 0:
+                self.start_offsets.append(0)
+                if self.opt.verbose:
+                    print(f"channel {channel} has no dropped samples at start")
             else:
-                reshaped_psds = np.reshape(psd_data,(self.opt.fft_bins,self.decimation,-1))
-                decimated_psds = np.nanmean(reshaped_psds,axis=1)
-        except:
-            decimated_psds = np.empty((self.opt.fft_bins,)).fill(np.nan)
+                self.start_offsets.append(nans[-1]+1)
+                if self.opt.verbose:
+                    print(f"channel {channel} has {nans[-1]} dropped samples at start")
 
-        
-        return short_tau_num_samples, short_tau_allan_vars, decimated_psds, freq_axis
-
-
-
-
-
-    def process_channel_avars(self, channel, subchannel):
+    def get_data_avars(self, data, rate, stop_len):
         """
-        process data from a given input channel and return Allan Variances
-        channel= data channel to process
-        tau_pivot_index = index of lagest tau computable from a single data chunk
-
-        return 
+        function to get octave Allan vars for a chunk of data
+        data should be a power of 2 length for the output data to be valid
+        rate is sample rate of data in Hz
+        stop_len is so that we can avoid fully decimating data on an initial 
+        pass to have better efficiency for large decimations
         """
 
-        #create storage variables
+        taus = []
+        avars = []
+        avar_vars = []
+        avar_samples = []
 
-        self.allan_var_totals = np.zeros((len(self.tau_values),self.opt.fft_bins), np.float64) #storage variable for allen variance calculations
-        self.allan_var_num_samples = np.zeros((len(self.tau_values)), np.int64) #storage variable for number of accumulated_samples
+        while len(data) > stop_len: 
+            if len(data) % 2 ==1:
+                #force data to have an even number of samples
+                #horribly inefficient but allows us to usefully handle non power of 2 length inputs
+                #note however this will invalidat subsequent recombination of the output data
+                data = data[:-1] 
 
-        self.decimated_psd = np.empty((self.opt.fft_bins,1), dtype=np.float64)
+            #compute and store allan var
+            tau = 1/rate
+            #print(f"computing Allan variance for tau = {tau} seconds")
+            avar, avar_var, n_samps = self.estimate_allan_var(data, rate)
+            taus.append(1/rate)
+            avars.append(avar)
+            avar_vars.append(avar_var)
+            avar_samples.append(n_samps)
 
+            #collapse data and compute rate for next octave
+            data, rate = self.integrate_data(data, rate)
 
-        segment_starting_index = self.proc_bounds[0]
-        #########################################
-        #processing loop for initial drf handling
-        #########################################
+        taus = np.array(taus)
+        avars = np.array(avars)
+        avar_vars = np.array(avar_vars)
+        avar_samples = np.array(avar_samples)
 
-        while segment_starting_index < self.proc_bounds[1]:
-            #check actual_bounds on the segment
+        return taus, avars, avar_vars, avar_samples, data, rate
 
-            if segment_starting_index <= self.proc_bounds[1] - self.maximum_drf_data_size:
-                last_segment = False
-                segment_len = self.maximum_drf_data_size
+    def handle_data_slice_avars(self, channel, subchannel, segment_length, start_index):
+        """
+        pull in a chunk of drf data and run computation for it
+        return results and decimated data
+        """
+        dio = drf.DigitalRFReader(self.opt.path)
+        data = dio.read_vector(start_index, segment_length, channel, subchannel) #import rf data segment
+        #data = remove_spikes(data) #just because I want to see how this does if I lose the noisy stuff
+        data = np.power(np.abs(data),2) #convert to power
+        rate = float(self.sr)
 
-            else: #last data slice we'll be handling
-                last_segment = True
-                segment_len = int((self.proc_bounds[1]-segment_starting_index)/(2*self.minimum_drf_data_size))*2*self.minimum_drf_data_size
-                if segment_len <=0:
-                    break
+        taus, avars, avar_vars, avar_samples, data, rate = self.get_data_avars(data, rate, 4)
 
+        return taus, avars, avar_vars, avar_samples, data, rate
 
-            num_samps, avars, decimated_psds, freq_axis = self.process_data_segment(channel, subchannel, segment_starting_index, segment_len, last_segment)
+    def integrate_data(self, data, rate):
+        """
+        data is a numpy array of data, must be an even length
+        rate is sample rate of the data
+        """
 
-            avars[np.isnan(avars)] = 0
+        new_data = np.nanmean(data.reshape((-1,2)),axis=1) #two rows with every other sample
+        new_rate = rate/2.0
 
-            self.allan_var_totals[:self.tau_pivot_index,:] += np.transpose(np.array([avars[:,i] * num_samps for i in range(np.shape(avars)[1])]))
-            self.allan_var_num_samples[:self.tau_pivot_index] += num_samps
+        return new_data, new_rate
 
-            self.decimated_psd = np.append(self.decimated_psd, decimated_psds, axis=1)
+    def estimate_allan_var(self, data, rate):
+        """
+        data is an array of the appropriately integrated allan variance samples (eg. \bar{y})
+        rate is the corresponding sample rate of the data (note this is also 1/tau)
+        """
 
-            segment_starting_index += int(self.maximum_drf_data_size/2)
+        avar = 0.5 * np.nanmean(np.power(data[1::] - data[0:-1], 2)) #despite looking a bit funny this slicing is correct
+        avar_var = 1/(len(data)-1) * avar
 
-        ##########################################
-        # process remaining tau values
-        ##########################################
+        return avar, avar_var, len(data)-1
 
+    def compute_drf_avars(self):
+        """
+        multi threaded procesing for full drf recordings
+        note we do lose a few samples at the slice edges but it's too complicated to deal with that for it to be worth it
+        """
 
-
-
-        allan_vars = np.transpose(np.array([self.allan_var_totals[:,i] / self.allan_var_num_samples for i in range(np.shape(avars)[1])]))
+        #### process allan vars 
         
-        return allan_vars, self.tau_values, self.allan_var_num_samples
+        channel_taus = []
+        channel_avars = []
+        channel_avar_vars = []
+        channel_avar_samples = []
 
+        for i in range(len(self.channels)):
+
+            if self.opt.verbose:
+                print(f"working on data from channel {self.channels[i]}")
+            
+            channel = self.channels[i]
+            subchannel = self.subchannels[i]
+            total_samples = self.proc_bounds[1] - self.proc_bounds[0] - self.start_offsets[i]
+
+            #get segment length for data import
+            segment_length = min(self.max_samples_per_core, 2**int(np.log2(total_samples/self.opt.num_processes)+1))
+            
+            num_segments = int(total_samples/segment_length) #note we lose the trailing edge of the data here but whatever
+
+            start_indices = np.arange(self.proc_bounds[0]+self.start_offsets[i], self.proc_bounds[1], segment_length)[:num_segments] #chop off the last partial segment
+
+            #pool = multiprocessing.Pool()
+            pool = multiprocessing.Pool(processes=self.opt.num_processes)
+            avar_slice = partial(self.handle_data_slice_avars, channel, subchannel, segment_length)
+
+            if self.opt.verbose:
+                print("starting multithreaded process")
+
+            outputs = pool.map(avar_slice, start_indices)
+
+            pool.close()
+            pool.join()
+
+            taus, avars, avar_vars, avar_samples, data, rate = outputs[1]
+            
+            for i in range(1,len(start_indices)):
+                avars += outputs[i][1]
+                avar_vars += outputs[i][2]
+                avar_samples += outputs[i][3]
+                data = np.append(data, outputs[i][4])
+
+            avars = avars / len(start_indices)
+            avar_vars = avar_vars / len(start_indices)
+
+            if self.opt.verbose:
+                print(f"operating on final data for taus greater than {taus[-1]} seconds")
+
+            #### finally operate on remaining data
+
+            if len(data) > 1:
+            
+                new_taus, new_avars, new_avar_vars, new_avar_samples, data, rate = self.get_data_avars(data, rate, 1)
+
+                taus = np.append(taus, new_taus)
+                avars = np.append(avars, new_avars)
+                avar_vars = np.append(avar_vars, new_avar_vars)
+                avar_samples = np.append(avar_samples, new_avar_samples)
+
+            channel_taus.append(taus)
+            channel_avars.append(avars)
+            channel_avar_vars.append(avar_vars)
+            channel_avar_samples.append(avar_samples)
+
+        return channel_taus, channel_avars, channel_avar_vars, channel_avar_samples
 
 
 
@@ -431,36 +287,45 @@ class AllenVarProcessor(object):
 
         #start by getting the important info about what sample rates we're dealing with, etc
         self.get_drf_metadata()
-
-        #figure out what the parameters for which we want to compute the allan variance are
-        self.get_tau_values()
-
         #process the allan variances
-
-        for channel, subchannel in zip(self.channels, self.subchannels):
-            allan_vars, taus, num_samples =self.process_channel_avars(channel, subchannel)
-
-            plt.figure()
-            try:
-                taulen = np.where(num_samples==0)[0][0]-1
-            except:
-                taulen=len(taus)
-            for i in range(self.opt.fft_bins):
-                plt.loglog(taus[:taulen],np.sqrt(allan_vars[:taulen,i]))
-            plt.grid()
-            plt.show()
+        channel_taus, channel_avars, channel_avar_vars, channel_avar_samples = self.compute_drf_avars()
 
 
         
+        plt.rcParams['figure.figsize'] = [8, 6]
 
+        plt.figure()
 
+        if self.opt.title:
+            plt.title(self.opt.title, fontsize=15)
+        else:
+            filename = self.opt.path.split('/')[-1]
+            plt.title(f"Allan variance for DRF recording {filename}", fontsize=15)
 
+        plt.ylabel(r"$ \sigma_y \left( \tau \right)$  $\left[\frac{V^2}{s}\right]$",fontsize=14)
+        plt.yticks(fontsize=12)
+        plt.xlabel(r"$ \tau $  $\left[s\right]$",fontsize=14)
+        plt.xticks(fontsize=12)
 
+        for i in range(len(self.channels)):
+            
+            #plt.errorbar(taus, np.sqrt(avars), yerr=np.sqrt(avar_vars))
+            plt.errorbar(channel_taus[i], np.sqrt(channel_avars[i]),yerr=np.sqrt(channel_avar_vars[i]), label=f"{self.channels[i]}", capsize=3, capthick=1)
 
+        plt.yscale('log')
+        plt.xscale('log')
+        plt.xlim([np.min(channel_taus), np.max(channel_taus)])
+        tracemin = np.min(np.sqrt(channel_avars))
+        tracemax = np.max(np.sqrt(channel_avars))
+        plt.ylim([10**int(np.log10(tracemin)), 10**int(np.log10(tracemax)+1)])
 
+        plt.legend(fontsize=14)
+        plt.grid()
+        plt.tight_layout()
 
-
-
+        if self.opt.outname:
+            plt.savefig(self.opt.outname, dpi=300)
+        plt.show()
 
 
 
@@ -558,23 +423,9 @@ def parse_command_line():
         "-t",
         "--title",
         dest="title",
-        default="Digital RF Data",
+        default=None,
         help="Use title provided for the plot.",
     )
-    parser.add_argument(
-        "-T",
-        "--taus",
-        dest="taubounds",
-        type=floatinttuple,
-        default=None,
-        metavar="TLOW:THIGH",
-        help=(
-            """min and max tau values in seconds, eg -T '1e-3:50.0'.
-            if not provided reasonable numbers will be chosen based on the dataset"""
-            
-        ),
-    )
-
     parser.add_argument(
         "-s",
         "--start",
@@ -597,7 +448,7 @@ def parse_command_line():
     )
     parser.add_argument(
         "-c",
-        "--channel",
+        "--channels",
         dest="channels",
         action=Extend,
         type=strinttuple,
@@ -607,22 +458,6 @@ def parse_command_line():
                 channel name and sub-channel pair, e.g. "ch0:0". The number and
                 colon are optional; if omitted, the receive sub-channel is zero.
                 """,
-    )
-    parser.add_argument(
-        "-b",
-        "--fft_bins",
-        dest="fft_bins",
-        default=32,
-        type=int,
-        help="The number of separate frequency bins in which to compute the Allan variance",
-    )
-    parser.add_argument(
-        "--tauscale",
-        dest="tauscale",
-        default="log10",
-        help="""x scaling for tau computation and plot: 'lin 'or 'log' (default: log)
-                If this is set to linear, the maximum number of samples is capped at 10,000
-                and thus the minimum tau cannot be less than taumax/1e4. this will override a provided tau range"""
     )
     parser.add_argument(
         "-P",
