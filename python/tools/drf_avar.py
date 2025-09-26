@@ -182,7 +182,7 @@ class AllenVarProcessor(object):
         data = np.power(np.abs(data),2) #convert to power
         rate = float(self.sr)
 
-        taus, avars, avar_vars, avar_samples, data, rate = self.get_data_avars(data, rate, 8)
+        taus, avars, avar_vars, avar_samples, data, rate = self.get_data_avars(data, rate, 4)
 
         return taus, avars, avar_vars, avar_samples, data, rate
 
