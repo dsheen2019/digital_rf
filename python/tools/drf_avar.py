@@ -39,10 +39,10 @@ class AllenVarProcessor(object):
         #general proceesing params
 
         available_memory_bytes = psutil.virtual_memory().available #definitely don't want to exceed this or we'll page
-        max_bytes_per_process = 128e8 #128 MB #cap per core data sizes for sanity's sake (also helps ensure reasonable workload distribution)
+        max_bytes_per_process = 512e8 #256 MB #cap per core data sizes for sanity's sake (also helps ensure reasonable workload distribution)
         bytes_per_sample = 4
 
-        max_allowed_data_size_per_core = min(max_bytes_per_process, available_memory_bytes/(8*self.opt.num_processes))  #prevent using up memory during operations on data
+        max_allowed_data_size_per_core = min(max_bytes_per_process, available_memory_bytes/(4*self.opt.num_processes))  #prevent using up all the computer memory during operations on data
 
         self.max_samples_per_core = 2**int(np.log2(max_allowed_data_size_per_core / bytes_per_sample))
 
@@ -173,9 +173,11 @@ class AllenVarProcessor(object):
         pull in a chunk of drf data and run computation for it
         return results and decimated data
         """
+        if self.opt.verbose:
+            print("handling data slice starting at sample {start_index}")
+            
         dio = drf.DigitalRFReader(self.opt.path)
         data = dio.read_vector(start_index, segment_length, channel, subchannel) #import rf data segment
-        #data = remove_spikes(data) #just because I want to see how this does if I lose the noisy stuff
         data = np.power(np.abs(data),2) #convert to power
         rate = float(self.sr)
 
