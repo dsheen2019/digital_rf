@@ -260,7 +260,7 @@ class AllenVarProcessor(object):
                 data = np.append(data, outputs[i][4])
 
             avars = avars / len(start_indices)
-            avar_vars = avar_vars / len(start_indices)
+            avar_vars = avar_vars / len(start_indices)**2
 
             if self.opt.verbose:
                 print(f"operating on final data for taus greater than {taus[-1]} seconds")
