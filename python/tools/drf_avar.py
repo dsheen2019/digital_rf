@@ -297,14 +297,14 @@ class AllenVarProcessor(object):
         plt.figure()
 
         if self.opt.title:
-            plt.title(self.opt.title, fontsize=15)
+            plt.title(self.opt.title, fontsize=14)
         else:
             filename = self.opt.path.split('/')[-1]
-            plt.title(f"Allan variance for DRF recording {filename}", fontsize=15)
+            plt.title(f"Allan variance for DRF recording {filename}", fontsize=14)
 
-        plt.ylabel(r"$ \sigma_y \left( \tau \right)$  $\left[\frac{V^2}{s}\right]$",fontsize=14)
+        plt.ylabel(r"$ \sigma_y \left( \tau \right)$  $\left[\frac{V^2}{s}\right]$",fontsize=13)
         plt.yticks(fontsize=12)
-        plt.xlabel(r"$ \tau $  $\left[s\right]$",fontsize=14)
+        plt.xlabel(r"$ \tau $  $\left[s\right]$",fontsize=13)
         plt.xticks(fontsize=12)
 
         for i in range(len(self.channels)):
@@ -319,13 +319,15 @@ class AllenVarProcessor(object):
         tracemax = np.max(np.sqrt(channel_avars))
         plt.ylim([10**int(np.log10(tracemin)), 10**int(np.log10(tracemax)+1)])
 
-        plt.legend(fontsize=14)
+        plt.legend(fontsize=13)
         plt.grid()
         plt.tight_layout()
 
         if self.opt.outname:
             plt.savefig(self.opt.outname, dpi=300)
-        plt.show()
+
+        if self.opt.appear or not self.opt.outname:
+            plt.show()
 
 
 
