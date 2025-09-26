@@ -320,9 +320,13 @@ class AllenVarProcessor(object):
         plt.yscale('log')
         plt.xscale('log')
         plt.xlim([np.min(channel_taus), np.max(channel_taus)])
-        tracemin = np.min(np.sqrt(channel_avars))
-        tracemax = np.max(np.sqrt(channel_avars))
-        plt.ylim([10**int(np.log10(tracemin)), 10**int(np.log10(tracemax)+1)])
+        tracemin = int(np.log10(np.min(np.sqrt(channel_avars))))
+        if tracemin < 0:
+            tracemin = tracemin - 1
+        tracemax = int(np.log10(np.max(np.sqrt(channel_avars))))
+        if tracemax > 0:
+            tracemax = tracemax + 1
+        plt.ylim([10**tracemin, 10**tracemax])
 
         plt.legend(fontsize=13)
         plt.grid()
