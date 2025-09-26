@@ -307,7 +307,7 @@ class AllenVarProcessor(object):
             filename = self.opt.path.split('/')[-1]
             plt.title(f"Allan variance for DRF recording {filename}", fontsize=14)
 
-        plt.ylabel(r"$ \sigma_y \left( \tau \right)$  $\left[\frac{V^2}{s}\right]$",fontsize=13)
+        plt.ylabel(r"$ \sigma_y \left( \tau \right)$  $\left[V^2\right]$",fontsize=13)
         plt.yticks(fontsize=12)
         plt.xlabel(r"$ \tau $  $\left[s\right]$",fontsize=13)
         plt.xticks(fontsize=12)
