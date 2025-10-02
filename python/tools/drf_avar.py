@@ -321,10 +321,10 @@ class AllenVarProcessor(object):
         plt.xscale('log')
         plt.xlim([np.min(channel_taus), np.max(channel_taus)])
         tracemin = int(np.log10(np.min(np.sqrt(channel_avars))))
-        if tracemin < 0:
+        if tracemin <= 0:
             tracemin = tracemin - 1
         tracemax = int(np.log10(np.max(np.sqrt(channel_avars))))
-        if tracemax > 0:
+        if tracemax >= 0:
             tracemax = tracemax + 1
         plt.ylim([10**tracemin, 10**tracemax])
 
