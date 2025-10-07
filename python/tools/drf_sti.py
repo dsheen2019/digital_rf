@@ -469,11 +469,15 @@ class DataPlotter(object):
             sub_second,
         )
 
-        self.f.suptitle(
-            "%s %s %4.2f MHz (%s)"
-            % (self.opt.title, timestamp, cfreq / 1e6, self.opt.path),
-            fontsize=10,
-        )
+        if self.opt.title is not None:
+            self.f.suptitle(self.opt.title, fontsize=10)
+
+        else:
+            self.f.suptitle(
+                "%s %s %4.2f MHz (%s)"
+                % ("Digital RF Data", timestamp, cfreq / 1e6, self.opt.path),
+                fontsize=10,
+            )
 
         # ax.legend(fontsize=8)
         ax.set_xlabel("time (UTC)", fontsize=8)
@@ -544,7 +548,7 @@ def parse_command_line():
         "-t",
         "--title",
         dest="title",
-        default="Digital RF Data",
+        default=None,
         help="Use title provided for the data.",
     )
     parser.add_argument(
