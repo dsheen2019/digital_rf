@@ -269,7 +269,7 @@ class DataPlotter(object):
 
         # setup plotting figure params to actually save plots reasonably
 
-        matplotlib.pyplot.rcParams['savefig.dpi'] = 600  # make any plot saved actually high res
+        matplotlib.pyplot.rcParams['savefig.dpi'] = 300  # make any plot saved actually decently high res
         matplotlib.pyplot.rcParams['figure.figsize'] = (10, 6) # make figures default to a reasonably large size 
 
         # initial plotting scales
