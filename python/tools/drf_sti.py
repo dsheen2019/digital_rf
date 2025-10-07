@@ -264,7 +264,13 @@ class DataPlotter(object):
         integrations.
 
         """
+
         # initialize outside the loop to avoid memory leak
+
+        # setup plotting figure params to actually save plots reasonably
+
+        matplotlib.pyplot.rcParams['savefig.dpi'] = 600  # make any plot saved actually high res
+        matplotlib.pyplot.rcParams['figure.figsize'] = (10, 6) # make figures default to a reasonably large size 
 
         # initial plotting scales
         vmin = 0
